@@ -176,13 +176,6 @@ async def query_order(
     start_time = time.time()
     app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
-    has_access = AccessScopeService.check_access(db, app.id, "ORDER_QUERY")
-    if not has_access:
-        raise HTTPException(
-            status_code=403,
-            detail=ErrorService.create_error_response("ACCESS_001")
-        )
-    
     request_id = await check_rate_limit(app, "ORDER_QUERY", db)
     
     if not ValidationService.validate_order_id(order_id):
@@ -237,13 +230,6 @@ async def query_customer(
 ):
     start_time = time.time()
     app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
-    
-    has_access = AccessScopeService.check_access(db, app.id, "CUSTOMER_QUERY")
-    if not has_access:
-        raise HTTPException(
-            status_code=403,
-            detail=ErrorService.create_error_response("ACCESS_001")
-        )
     
     request_id = await check_rate_limit(app, "CUSTOMER_QUERY", db)
     
@@ -301,13 +287,6 @@ async def query_product(
     start_time = time.time()
     app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
-    has_access = AccessScopeService.check_access(db, app.id, "PRODUCT_QUERY")
-    if not has_access:
-        raise HTTPException(
-            status_code=403,
-            detail=ErrorService.create_error_response("ACCESS_001")
-        )
-    
     request_id = await check_rate_limit(app, "PRODUCT_QUERY", db)
     
     product = BusinessDataService.get_product(db, product_id)
@@ -354,13 +333,6 @@ async def create_aftersale(
 ):
     start_time = time.time()
     app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
-    
-    has_access = AccessScopeService.check_access(db, app.id, "AFTERSALE_CREATE")
-    if not has_access:
-        raise HTTPException(
-            status_code=403,
-            detail=ErrorService.create_error_response("ACCESS_001")
-        )
     
     request_id = await check_rate_limit(app, "AFTERSALE_CREATE", db)
     
@@ -433,13 +405,6 @@ async def query_aftersale(
     start_time = time.time()
     app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
-    has_access = AccessScopeService.check_access(db, app.id, "AFTERSALE_QUERY")
-    if not has_access:
-        raise HTTPException(
-            status_code=403,
-            detail=ErrorService.create_error_response("ACCESS_001")
-        )
-    
     request_id = await check_rate_limit(app, "AFTERSALE_QUERY", db)
     
     aftersale = BusinessDataService.get_aftersale(db, aftersale_id)
@@ -488,13 +453,6 @@ async def update_order_status(
 ):
     start_time = time.time()
     app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
-    
-    has_access = AccessScopeService.check_access(db, app.id, "ORDER_STATUS_UPDATE")
-    if not has_access:
-        raise HTTPException(
-            status_code=403,
-            detail=ErrorService.create_error_response("ACCESS_001")
-        )
     
     request_id = await check_rate_limit(app, "ORDER_STATUS_UPDATE", db)
     

@@ -304,10 +304,60 @@ async def replay_callback(
     if not callback:
         raise HTTPException(status_code=404, detail="Callback not found")
     
+    success = await CallbackService.send_callback(callback_id, db)
+    
+    db.refresh(callback)
+    
     return ApiResponse(
         code=200,
-        message="Callback replay scheduled",
-        data={"callback_id": callback_id}
+        message="Callback replay executed",
+        data={
+            "callback_id": callback_id,
+            "status": callback.status.value,
+            "sent_at": callback.sent_at.isoformat() if callback.sent_at else None,
+            "response_data": callback.response_data,
+            "error_message": callback.error_message,
+            "retry_count": callback.retry_count,
+            "success": success
+        }
+    )
+
+@router.get("/callbacks/{callback_id}", response_model=ApiResponse)
+async def get_callback_detail(
+    callback_id: int,
+    request: Request = None,
+    db: Session = Depends(get_db)
+):
+    verify_admin(request)
+    
+    from models.database import Callback
+    callback = db.query(Callback).filter(Callback.id == callback_id).first()
+    if not callback:
+        raise HTTPException(status_code=404, detail="Callback not found")
+    
+    app = db.query(Application).filter(Application.id == callback.application_id).first()
+    
+    return ApiResponse(
+        code=200,
+        message="Success",
+        data={
+            "id": callback.id,
+            "application_id": callback.application_id,
+            "app_code": app.app_code if app else None,
+            "app_name": app.app_name if app else None,
+            "event_type": callback.event_type,
+            "payload": callback.payload,
+            "status": callback.status.value,
+            "callback_url": callback.callback_url,
+            "retry_count": callback.retry_count,
+            "max_retries": callback.max_retries,
+            "scheduled_at": callback.scheduled_at.isoformat() if callback.scheduled_at else None,
+            "sent_at": callback.sent_at.isoformat() if callback.sent_at else None,
+            "response_data": callback.response_data,
+            "error_message": callback.error_message,
+            "created_at": callback.created_at.isoformat(),
+            "updated_at": callback.updated_at.isoformat()
+        }
     )
 
 @router.post("/announcements", response_model=ApiResponse)
