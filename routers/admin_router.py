@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from config.database import get_db
 from schemas.schemas import (
@@ -292,34 +292,60 @@ async def list_failed_callbacks(
         data={"callbacks": callback_list, "total": len(callback_list)}
     )
 
+class ReplayCallbackRequest(BaseModel):
+    delay_minutes: int = Field(0, ge=0, description="延迟重放分钟数，0表示立即重放")
+
 @router.post("/callbacks/{callback_id}/replay", response_model=ApiResponse)
 async def replay_callback(
     callback_id: int,
+    replay_request: ReplayCallbackRequest = ReplayCallbackRequest(),
     request: Request = None,
     db: Session = Depends(get_db)
 ):
     verify_admin(request)
     
-    callback = CallbackService.replay_callback(db, callback_id)
+    callback = CallbackService.replay_callback(db, callback_id, replay_request.delay_minutes)
     if not callback:
         raise HTTPException(status_code=404, detail="Callback not found")
     
-    success = await CallbackService.send_callback(callback_id, db)
+    result = {
+        "callback_id": callback_id,
+        "status": callback.status.value,
+        "retry_count": callback.retry_count,
+        "scheduled_at": callback.scheduled_at.isoformat(),
+        "delay_minutes": replay_request.delay_minutes
+    }
     
-    db.refresh(callback)
-    
-    return ApiResponse(
-        code=200,
-        message="Callback replay executed",
-        data={
-            "callback_id": callback_id,
-            "status": callback.status.value,
+    if replay_request.delay_minutes == 0:
+        success = await CallbackService.send_callback(callback_id, db)
+        db.refresh(callback)
+        
+        attempts = CallbackService.get_send_attempts(db, callback_id)
+        last_attempt = attempts[-1] if attempts else None
+        
+        result.update({
             "sent_at": callback.sent_at.isoformat() if callback.sent_at else None,
             "response_data": callback.response_data,
             "error_message": callback.error_message,
-            "retry_count": callback.retry_count,
-            "success": success
-        }
+            "http_status_code": callback.http_status_code,
+            "success": success,
+            "sign_version": callback.sign_version,
+            "last_attempt": {
+                "attempt_number": last_attempt.attempt_number,
+                "status": last_attempt.status.value,
+                "http_status_code": last_attempt.http_status_code,
+                "response_data": last_attempt.response_data,
+                "error_message": last_attempt.error_message,
+                "sent_at": last_attempt.sent_at.isoformat(),
+                "duration_ms": last_attempt.duration_ms,
+                "sign_version": last_attempt.sign_version
+            } if last_attempt else None
+        })
+    
+    return ApiResponse(
+        code=200,
+        message="Callback replay " + ("executed" if replay_request.delay_minutes == 0 else "scheduled"),
+        data=result
     )
 
 @router.get("/callbacks/{callback_id}", response_model=ApiResponse)
@@ -336,6 +362,22 @@ async def get_callback_detail(
         raise HTTPException(status_code=404, detail="Callback not found")
     
     app = db.query(Application).filter(Application.id == callback.application_id).first()
+    
+    attempts = CallbackService.get_send_attempts(db, callback_id)
+    attempts_list = [
+        {
+            "id": attempt.id,
+            "attempt_number": attempt.attempt_number,
+            "status": attempt.status.value,
+            "http_status_code": attempt.http_status_code,
+            "response_data": attempt.response_data,
+            "error_message": attempt.error_message,
+            "sign_version": attempt.sign_version,
+            "sent_at": attempt.sent_at.isoformat(),
+            "duration_ms": attempt.duration_ms
+        }
+        for attempt in attempts
+    ]
     
     return ApiResponse(
         code=200,
@@ -354,9 +396,12 @@ async def get_callback_detail(
             "scheduled_at": callback.scheduled_at.isoformat() if callback.scheduled_at else None,
             "sent_at": callback.sent_at.isoformat() if callback.sent_at else None,
             "response_data": callback.response_data,
+            "http_status_code": callback.http_status_code,
             "error_message": callback.error_message,
+            "sign_version": callback.sign_version,
             "created_at": callback.created_at.isoformat(),
-            "updated_at": callback.updated_at.isoformat()
+            "updated_at": callback.updated_at.isoformat(),
+            "send_attempts": attempts_list
         }
     )
 

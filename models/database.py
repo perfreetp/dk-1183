@@ -22,6 +22,7 @@ class CallStatus(str, enum.Enum):
 
 class CallbackStatus(str, enum.Enum):
     PENDING = "pending"
+    SENDING = "sending"
     SENT = "sent"
     FAILED = "failed"
     CONFIRMED = "confirmed"
@@ -131,13 +132,37 @@ class Callback(Base):
     callback_url = Column(String(255))
     response_data = Column(Text)
     error_message = Column(Text)
+    http_status_code = Column(Integer)
+    sign_version = Column(String(20), default="v1")
     scheduled_at = Column(DateTime)
     sent_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    send_attempts = relationship("CallbackSendAttempt", back_populates="callback")
+
     __table_args__ = (
         Index('idx_status_scheduled', 'status', 'scheduled_at'),
+    )
+
+class CallbackSendAttempt(Base):
+    __tablename__ = "callback_send_attempts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    callback_id = Column(Integer, ForeignKey("callbacks.id"), nullable=False)
+    attempt_number = Column(Integer, nullable=False)
+    status = Column(Enum(CallbackStatus), nullable=False)
+    http_status_code = Column(Integer)
+    response_data = Column(Text)
+    error_message = Column(Text)
+    sign_version = Column(String(20))
+    sent_at = Column(DateTime, default=datetime.utcnow)
+    duration_ms = Column(Integer)
+
+    callback = relationship("Callback", back_populates="send_attempts")
+
+    __table_args__ = (
+        Index('idx_callback_attempt', 'callback_id', 'attempt_number'),
     )
 
 class Announcement(Base):
