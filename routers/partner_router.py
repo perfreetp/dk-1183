@@ -118,13 +118,14 @@ def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)):
 async def verify_app_credentials(
     authorization: Optional[str] = Header(None),
     app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
     signature: Optional[str] = Header(None, alias="X-Signature"),
     timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
     nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
 ) -> Application:
     if not authorization:
-        if not all([app_code, signature, timestamp, nonce]):
+        if not all([app_code, app_secret, signature, timestamp, nonce]):
             raise HTTPException(
                 status_code=401,
                 detail=ErrorService.create_error_response("AUTH_001")
@@ -134,23 +135,36 @@ async def verify_app_credentials(
         if not application:
             raise HTTPException(
                 status_code=401,
-                detail=ErrorService.create_error_response("AUTH_001")
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid app_code")
+            )
+        
+        if not AuthService.verify_secret(app_secret, application.app_secret):
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid app_secret")
             )
         
         expected_signature = AuthService.generate_signature(
-            app_code, application.app_secret, timestamp, nonce
+            app_code, app_secret, timestamp, nonce
         )
         if signature != expected_signature:
             raise HTTPException(
                 status_code=401,
-                detail=ErrorService.create_error_response("AUTH_003")
+                detail=ErrorService.create_error_response("AUTH_003", None, "Signature verification failed")
             )
     else:
-        scheme, token = authorization.split()
+        try:
+            scheme, token = authorization.split()
+        except ValueError:
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization header format")
+            )
+        
         if scheme.lower() != "bearer":
             raise HTTPException(
                 status_code=401,
-                detail=ErrorService.create_error_response("AUTH_001")
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization scheme")
             )
         
         payload = AuthService.verify_token(token)

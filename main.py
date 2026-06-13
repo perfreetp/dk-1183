@@ -14,106 +14,114 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def init_database():
-    Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
     try:
-        ErrorService.initialize_error_codes(db)
-        
-        existing_apis = db.query(ApiEndpoint).count()
-        if existing_apis == 0:
-            apis = [
-                ApiEndpoint(
-                    api_code="ORDER_QUERY",
-                    api_name="订单查询",
-                    category="order",
-                    method="GET",
-                    path="/api/v1/business/order/query",
-                    description="根据订单号查询订单详情",
-                    parameters={"order_id": {"type": "string", "required": True}},
-                    request_example='{"order_id": "ORD123456"}',
-                    response_example='{"order_id": "ORD123456", "status": "completed"}',
-                    rate_limit=100,
-                    version="1.0"
-                ),
-                ApiEndpoint(
-                    api_code="CUSTOMER_QUERY",
-                    api_name="客户查询",
-                    category="customer",
-                    method="GET",
-                    path="/api/v1/business/customer/query",
-                    description="根据客户号查询客户信息",
-                    parameters={"customer_id": {"type": "string", "required": True}},
-                    request_example='{"customer_id": "CUST123456"}',
-                    response_example='{"customer_id": "CUST123456", "name": "张三"}',
-                    rate_limit=100,
-                    version="1.0"
-                ),
-                ApiEndpoint(
-                    api_code="PRODUCT_QUERY",
-                    api_name="商品查询",
-                    category="product",
-                    method="GET",
-                    path="/api/v1/business/product/query",
-                    description="根据商品号查询商品信息",
-                    parameters={"product_id": {"type": "string", "required": True}},
-                    request_example='{"product_id": "P001"}',
-                    response_example='{"product_id": "P001", "name": "Product A"}',
-                    rate_limit=200,
-                    version="1.0"
-                ),
-                ApiEndpoint(
-                    api_code="AFTERSALE_CREATE",
-                    api_name="售后创建",
-                    category="after_sale",
-                    method="POST",
-                    path="/api/v1/business/aftersale/create",
-                    description="提交售后申请",
-                    parameters={
-                        "order_id": {"type": "string", "required": True},
-                        "type": {"type": "string", "required": True, "enum": ["refund", "exchange", "repair"]},
-                        "reason": {"type": "string", "required": True}
-                    },
-                    request_example='{"order_id": "ORD123456", "type": "refund", "reason": "商品损坏"}',
-                    response_example='{"aftersale_id": "AS123456", "status": "pending"}',
-                    rate_limit=50,
-                    version="1.0"
-                ),
-                ApiEndpoint(
-                    api_code="AFTERSALE_QUERY",
-                    api_name="售后查询",
-                    category="after_sale",
-                    method="GET",
-                    path="/api/v1/business/aftersale/query",
-                    description="根据售后单号查询售后信息",
-                    parameters={"aftersale_id": {"type": "string", "required": True}},
-                    request_example='{"aftersale_id": "AS123456"}',
-                    response_example='{"aftersale_id": "AS123456", "status": "processing"}',
-                    rate_limit=100,
-                    version="1.0"
-                ),
-                ApiEndpoint(
-                    api_code="ORDER_STATUS_UPDATE",
-                    api_name="订单状态更新",
-                    category="order",
-                    method="POST",
-                    path="/api/v1/business/order/status/update",
-                    description="更新订单状态",
-                    parameters={
-                        "order_id": {"type": "string", "required": True},
-                        "new_status": {"type": "string", "required": True}
-                    },
-                    request_example='{"order_id": "ORD123456", "new_status": "shipped"}',
-                    response_example='{"order_id": "ORD123456", "new_status": "shipped"}',
-                    rate_limit=50,
-                    version="1.0"
-                )
-            ]
-            for api in apis:
-                db.add(api)
-            db.commit()
-            logger.info("Initialized 6 API endpoints")
-    finally:
-        db.close()
+        Base.metadata.create_all(bind=engine)
+        db = SessionLocal()
+        try:
+            ErrorService.initialize_error_codes(db)
+            
+            existing_apis = db.query(ApiEndpoint).count()
+            if existing_apis == 0:
+                apis = [
+                    ApiEndpoint(
+                        api_code="ORDER_QUERY",
+                        api_name="订单查询",
+                        category="order",
+                        method="GET",
+                        path="/api/v1/business/order/query",
+                        description="根据订单号查询订单详情",
+                        parameters={"order_id": {"type": "string", "required": True}},
+                        request_example='{"order_id": "ORD123456"}',
+                        response_example='{"order_id": "ORD123456", "status": "completed"}',
+                        rate_limit=100,
+                        version="1.0"
+                    ),
+                    ApiEndpoint(
+                        api_code="CUSTOMER_QUERY",
+                        api_name="客户查询",
+                        category="customer",
+                        method="GET",
+                        path="/api/v1/business/customer/query",
+                        description="根据客户号查询客户信息",
+                        parameters={"customer_id": {"type": "string", "required": True}},
+                        request_example='{"customer_id": "CUST123456"}',
+                        response_example='{"customer_id": "CUST123456", "name": "张三"}',
+                        rate_limit=100,
+                        version="1.0"
+                    ),
+                    ApiEndpoint(
+                        api_code="PRODUCT_QUERY",
+                        api_name="商品查询",
+                        category="product",
+                        method="GET",
+                        path="/api/v1/business/product/query",
+                        description="根据商品号查询商品信息",
+                        parameters={"product_id": {"type": "string", "required": True}},
+                        request_example='{"product_id": "P001"}',
+                        response_example='{"product_id": "P001", "name": "Product A"}',
+                        rate_limit=200,
+                        version="1.0"
+                    ),
+                    ApiEndpoint(
+                        api_code="AFTERSALE_CREATE",
+                        api_name="售后创建",
+                        category="after_sale",
+                        method="POST",
+                        path="/api/v1/business/aftersale/create",
+                        description="提交售后申请",
+                        parameters={
+                            "order_id": {"type": "string", "required": True},
+                            "type": {"type": "string", "required": True, "enum": ["refund", "exchange", "repair"]},
+                            "reason": {"type": "string", "required": True}
+                        },
+                        request_example='{"order_id": "ORD123456", "type": "refund", "reason": "商品损坏"}',
+                        response_example='{"aftersale_id": "AS123456", "status": "pending"}',
+                        rate_limit=50,
+                        version="1.0"
+                    ),
+                    ApiEndpoint(
+                        api_code="AFTERSALE_QUERY",
+                        api_name="售后查询",
+                        category="after_sale",
+                        method="GET",
+                        path="/api/v1/business/aftersale/query",
+                        description="根据售后单号查询售后信息",
+                        parameters={"aftersale_id": {"type": "string", "required": True}},
+                        request_example='{"aftersale_id": "AS123456"}',
+                        response_example='{"aftersale_id": "AS123456", "status": "processing"}',
+                        rate_limit=100,
+                        version="1.0"
+                    ),
+                    ApiEndpoint(
+                        api_code="ORDER_STATUS_UPDATE",
+                        api_name="订单状态更新",
+                        category="order",
+                        method="POST",
+                        path="/api/v1/business/order/status/update",
+                        description="更新订单状态",
+                        parameters={
+                            "order_id": {"type": "string", "required": True},
+                            "new_status": {"type": "string", "required": True}
+                        },
+                        request_example='{"order_id": "ORD123456", "new_status": "shipped"}',
+                        response_example='{"order_id": "ORD123456", "new_status": "shipped"}',
+                        rate_limit=50,
+                        version="1.0"
+                    )
+                ]
+                for api in apis:
+                    db.add(api)
+                db.commit()
+                logger.info("Initialized 6 API endpoints")
+            
+            from services.business_service import BusinessDataService
+            BusinessDataService.init_test_data(db)
+            logger.info("Initialized test data")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Database initialization failed: {e}. Service will start anyway.")
+        logger.info("Service starting without database initialization")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -29,14 +29,14 @@ class ApplicationCreate(BaseModel):
     app_name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
     contact_name: str = Field(..., min_length=1, max_length=50)
-    contact_email: str = Field(..., regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    contact_email: str = Field(..., pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
     contact_phone: Optional[str] = Field(None, max_length=20)
 
 class ApplicationUpdate(BaseModel):
     app_name: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = None
     contact_name: Optional[str] = Field(None, max_length=50)
-    contact_email: Optional[str] = Field(None, regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    contact_email: Optional[str] = Field(None, pattern=r'^[\w\.-]+@[\w\.-]+\.\w+$')
     contact_phone: Optional[str] = Field(None, max_length=20)
     daily_quota: Optional[int] = Field(None, gt=0)
     status: Optional[AppStatus] = None

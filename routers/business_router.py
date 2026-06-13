@@ -1,31 +1,48 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
+from pydantic import BaseModel, Field
 import uuid
 import time
 
 from config.database import get_db
 from schemas.schemas import ApiResponse, CallStatus
-from services.auth_service import ApplicationService, AccessScopeService
-from services.rate_limit_service import RateLimitService, CallLogService, StatisticsService
+from services.auth_service import ApplicationService, AccessScopeService, AuthService
+from services.rate_limit_service import RateLimitService, CallLogService
 from services.error_service import ErrorService, ValidationService
-from models.database import Application, ApiEndpoint, CallLog
+from services.callback_service import CallbackService
+from services.business_service import BusinessDataService
+from models.database import Application, ApiEndpoint
 from schemas.schemas import AppStatus
 
 router = APIRouter(prefix="/api/v1/business", tags=["业务接口"])
+
+class AfterSaleCreateRequest(BaseModel):
+    order_id: str = Field(..., min_length=6, max_length=50)
+    type: str = Field(..., description="售后类型: refund/exchange/repair")
+    reason: str = Field(..., min_length=1, max_length=500)
+
+class OrderStatusUpdateRequest(BaseModel):
+    order_id: str = Field(..., min_length=6, max_length=50)
+    new_status: str = Field(..., description="订单状态")
 
 async def verify_business_access(
     authorization: str = Header(...),
     db: Session = Depends(get_db)
 ) -> tuple[Application, str]:
-    from services.auth_service import AuthService
+    try:
+        scheme, token = authorization.split()
+    except ValueError:
+        raise HTTPException(
+            status_code=401,
+            detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization header format")
+        )
     
-    scheme, token = authorization.split()
     if scheme.lower() != "bearer":
         raise HTTPException(
             status_code=401,
-            detail=ErrorService.create_error_response("AUTH_001")
+            detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization scheme")
         )
     
     payload = AuthService.verify_token(token)
@@ -79,7 +96,7 @@ async def check_rate_limit(
                 detail=ErrorService.create_error_response("RATE_002")
             )
     
-    return f"{app.app_code}-{int(time.time() * 1000)}"
+    return f"{app.app_code}-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
 
 def log_api_call(
     db: Session,
@@ -136,17 +153,24 @@ async def query_order(
             detail=ErrorService.create_error_response("VALIDATION_001", request_id, "Invalid order ID")
         )
     
+    order = BusinessDataService.get_order(db, order_id)
+    
+    if not order:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 1, request_id, request, CallStatus.FAILED, 404, "RESOURCE_002", "Order not found", duration_ms)
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorService.create_error_response("RESOURCE_002", request_id, f"Order {order_id} not found")
+        )
+    
     order_data = {
-        "order_id": order_id,
-        "customer_id": "CUST001",
-        "status": "completed",
-        "total_amount": 299.99,
-        "created_at": "2024-01-15T10:30:00Z",
-        "updated_at": "2024-01-15T14:20:00Z",
-        "items": [
-            {"product_id": "P001", "name": "Product A", "quantity": 2, "price": 99.99},
-            {"product_id": "P002", "name": "Product B", "quantity": 1, "price": 100.01}
-        ]
+        "order_id": order.order_id,
+        "customer_id": order.customer_id,
+        "status": order.status,
+        "total_amount": order.total_amount / 100,
+        "items": order.items or [],
+        "created_at": order.created_at.isoformat() + "Z",
+        "updated_at": order.updated_at.isoformat() + "Z"
     }
     
     duration_ms = int((time.time() - start_time) * 1000)
@@ -186,15 +210,25 @@ async def query_customer(
             detail=ErrorService.create_error_response("VALIDATION_001", request_id, "Invalid customer ID")
         )
     
+    customer = BusinessDataService.get_customer(db, customer_id)
+    
+    if not customer:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 2, request_id, request, CallStatus.FAILED, 404, "RESOURCE_003", "Customer not found", duration_ms)
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorService.create_error_response("RESOURCE_003", request_id, f"Customer {customer_id} not found")
+        )
+    
     customer_data = {
-        "customer_id": customer_id,
-        "name": "张三",
-        "email": "zhangsan@example.com",
-        "phone": "138****8888",
-        "level": "VIP",
-        "total_orders": 50,
-        "total_amount": 15000.00,
-        "created_at": "2020-01-01T00:00:00Z"
+        "customer_id": customer.customer_id,
+        "name": customer.name,
+        "email": customer.email,
+        "phone": customer.phone,
+        "level": customer.level,
+        "total_orders": customer.total_orders,
+        "total_amount": customer.total_amount / 100,
+        "created_at": customer.created_at.isoformat() + "Z"
     }
     
     duration_ms = int((time.time() - start_time) * 1000)
@@ -226,14 +260,24 @@ async def query_product(
     
     request_id = await check_rate_limit(app, "PRODUCT_QUERY", db)
     
+    product = BusinessDataService.get_product(db, product_id)
+    
+    if not product:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 3, request_id, request, CallStatus.FAILED, 404, "RESOURCE_001", "Product not found", duration_ms)
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorService.create_error_response("RESOURCE_001", request_id, f"Product {product_id} not found")
+        )
+    
     product_data = {
-        "product_id": product_id,
-        "name": "Product Name",
-        "category": "Electronics",
-        "price": 199.99,
-        "stock": 100,
-        "status": "available",
-        "description": "Product description here"
+        "product_id": product.product_id,
+        "name": product.name,
+        "category": product.category,
+        "price": product.price / 100,
+        "stock": product.stock,
+        "status": product.status,
+        "description": product.description
     }
     
     duration_ms = int((time.time() - start_time) * 1000)
@@ -248,7 +292,7 @@ async def query_product(
 
 @router.post("/aftersale/create")
 async def create_aftersale(
-    aftersale_data: dict,
+    aftersale_req: AfterSaleCreateRequest,
     request: Request,
     authorization: str = Header(...),
     db: Session = Depends(get_db)
@@ -265,14 +309,48 @@ async def create_aftersale(
     
     request_id = await check_rate_limit(app, "AFTERSALE_CREATE", db)
     
-    aftersale_id = f"AS{int(time.time() * 1000)}"
+    validation_result = BusinessDataService.validate_aftersale_params(
+        aftersale_req.order_id, aftersale_req.type, aftersale_req.reason
+    )
+    
+    if not validation_result["valid"]:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 4, request_id, request, CallStatus.FAILED, 400, "VALIDATION_001", 
+                     str(validation_result["errors"]), duration_ms)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": 400,
+                "message": "参数校验失败",
+                "error_code": "VALIDATION_001",
+                "request_id": request_id,
+                "errors": validation_result["errors"]
+            }
+        )
+    
+    order = BusinessDataService.get_order(db, aftersale_req.order_id)
+    if not order:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 4, request_id, request, CallStatus.FAILED, 404, "RESOURCE_002", 
+                     f"Order {aftersale_req.order_id} not found", duration_ms)
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorService.create_error_response("RESOURCE_002", request_id, 
+                                                      f"Order {aftersale_req.order_id} not found")
+        )
+    
+    aftersale = BusinessDataService.create_aftersale(
+        db, aftersale_req.order_id, aftersale_req.type, aftersale_req.reason
+    )
     
     result = {
-        "aftersale_id": aftersale_id,
-        "order_id": aftersale_data.get("order_id"),
-        "type": aftersale_data.get("type", "refund"),
-        "status": "pending",
-        "created_at": datetime.utcnow().isoformat() + "Z"
+        "aftersale_id": aftersale.aftersale_id,
+        "order_id": aftersale.order_id,
+        "type": aftersale.type,
+        "reason": aftersale.reason,
+        "status": aftersale.status,
+        "created_at": aftersale.created_at.isoformat() + "Z",
+        "request_id": request_id
     }
     
     duration_ms = int((time.time() - start_time) * 1000)
@@ -304,14 +382,26 @@ async def query_aftersale(
     
     request_id = await check_rate_limit(app, "AFTERSALE_QUERY", db)
     
+    aftersale = BusinessDataService.get_aftersale(db, aftersale_id)
+    
+    if not aftersale:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 4, request_id, request, CallStatus.FAILED, 404, "RESOURCE_001", 
+                     "After-sale not found", duration_ms)
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorService.create_error_response("RESOURCE_001", request_id, 
+                                                      f"After-sale {aftersale_id} not found")
+        )
+    
     aftersale_data = {
-        "aftersale_id": aftersale_id,
-        "order_id": "ORD001",
-        "type": "refund",
-        "reason": "Product damaged",
-        "status": "processing",
-        "created_at": "2024-01-15T10:00:00Z",
-        "updated_at": "2024-01-15T12:00:00Z"
+        "aftersale_id": aftersale.aftersale_id,
+        "order_id": aftersale.order_id,
+        "type": aftersale.type,
+        "reason": aftersale.reason,
+        "status": aftersale.status,
+        "created_at": aftersale.created_at.isoformat() + "Z",
+        "updated_at": aftersale.updated_at.isoformat() + "Z"
     }
     
     duration_ms = int((time.time() - start_time) * 1000)
@@ -326,8 +416,7 @@ async def query_aftersale(
 
 @router.post("/order/status/update")
 async def update_order_status(
-    order_id: str,
-    new_status: str,
+    status_req: OrderStatusUpdateRequest,
     request: Request,
     authorization: str = Header(...),
     db: Session = Depends(get_db)
@@ -344,11 +433,57 @@ async def update_order_status(
     
     request_id = await check_rate_limit(app, "ORDER_STATUS_UPDATE", db)
     
+    validation_result = BusinessDataService.validate_order_status(status_req.new_status)
+    
+    if not validation_result["valid"]:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 1, request_id, request, CallStatus.FAILED, 400, "VALIDATION_001", 
+                     str(validation_result["errors"]), duration_ms)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": 400,
+                "message": "参数校验失败",
+                "error_code": "VALIDATION_001",
+                "request_id": request_id,
+                "errors": validation_result["errors"]
+            }
+        )
+    
+    order = BusinessDataService.get_order(db, status_req.order_id)
+    if not order:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_api_call(db, app, 1, request_id, request, CallStatus.FAILED, 404, "RESOURCE_002", 
+                     f"Order {status_req.order_id} not found", duration_ms)
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorService.create_error_response("RESOURCE_002", request_id, 
+                                                      f"Order {status_req.order_id} not found")
+        )
+    
+    previous_status = order.status
+    updated_order = BusinessDataService.update_order_status(db, status_req.order_id, status_req.new_status)
+    
+    callback = CallbackService.create_callback(
+        db=db,
+        application_id=app.id,
+        event_type="order_status_updated",
+        payload={
+            "order_id": status_req.order_id,
+            "previous_status": previous_status,
+            "new_status": status_req.new_status,
+            "updated_at": updated_order.updated_at.isoformat() + "Z",
+            "request_id": request_id
+        }
+    )
+    
     result = {
-        "order_id": order_id,
-        "previous_status": "pending",
-        "new_status": new_status,
-        "updated_at": datetime.utcnow().isoformat() + "Z"
+        "order_id": status_req.order_id,
+        "previous_status": previous_status,
+        "new_status": status_req.new_status,
+        "updated_at": updated_order.updated_at.isoformat() + "Z",
+        "callback_id": callback.id,
+        "request_id": request_id
     }
     
     duration_ms = int((time.time() - start_time) * 1000)
@@ -370,7 +505,6 @@ async def confirm_callback(
 ):
     app, app_code = await verify_business_access(authorization, db)
     
-    from services.callback_service import CallbackService
     callback = CallbackService.confirm_callback(db, callback_id)
     
     if not callback:
