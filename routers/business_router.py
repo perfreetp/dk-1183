@@ -19,41 +19,76 @@ from schemas.schemas import AppStatus
 router = APIRouter(prefix="/api/v1/business", tags=["业务接口"])
 
 class AfterSaleCreateRequest(BaseModel):
-    order_id: str = Field(..., min_length=6, max_length=50)
-    type: str = Field(..., description="售后类型: refund/exchange/repair")
-    reason: str = Field(..., min_length=1, max_length=500)
+    order_id: Optional[str] = None
+    type: Optional[str] = None
+    reason: Optional[str] = None
 
 class OrderStatusUpdateRequest(BaseModel):
-    order_id: str = Field(..., min_length=6, max_length=50)
-    new_status: str = Field(..., description="订单状态")
+    order_id: Optional[str] = None
+    new_status: Optional[str] = None
 
 async def verify_business_access(
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
+    signature: Optional[str] = Header(None, alias="X-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
-) -> tuple[Application, str]:
-    try:
-        scheme, token = authorization.split()
-    except ValueError:
+) -> Application:
+    if authorization:
+        try:
+            scheme, token = authorization.split()
+        except ValueError:
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization header format")
+            )
+        
+        if scheme.lower() != "bearer":
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization scheme")
+            )
+        
+        payload = AuthService.verify_token(token)
+        if not payload or payload.get("type") != "access":
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_002")
+            )
+        
+        app_code = payload.get("sub")
+        application = ApplicationService.get_application_by_code(db, app_code)
+    
+    elif all([app_code, app_secret, signature, timestamp, nonce]):
+        application = ApplicationService.get_application_by_code(db, app_code)
+        if not application:
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid app_code")
+            )
+        
+        if not AuthService.verify_secret(app_secret, application.app_secret):
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_001", None, "Invalid app_secret")
+            )
+        
+        expected_signature = AuthService.generate_signature(
+            app_code, app_secret, timestamp, nonce
+        )
+        if signature != expected_signature:
+            raise HTTPException(
+                status_code=401,
+                detail=ErrorService.create_error_response("AUTH_003", None, "Signature verification failed")
+            )
+    
+    else:
         raise HTTPException(
             status_code=401,
-            detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization header format")
+            detail=ErrorService.create_error_response("AUTH_001", None, "Missing authentication headers")
         )
-    
-    if scheme.lower() != "bearer":
-        raise HTTPException(
-            status_code=401,
-            detail=ErrorService.create_error_response("AUTH_001", None, "Invalid authorization scheme")
-        )
-    
-    payload = AuthService.verify_token(token)
-    if not payload or payload.get("type") != "access":
-        raise HTTPException(
-            status_code=401,
-            detail=ErrorService.create_error_response("AUTH_002")
-        )
-    
-    app_code = payload.get("sub")
-    application = ApplicationService.get_application_by_code(db, app_code)
     
     if not application:
         raise HTTPException(
@@ -67,7 +102,7 @@ async def verify_business_access(
             detail=ErrorService.create_error_response("AUTH_004" if application.status == AppStatus.SUSPENDED else "AUTH_005")
         )
     
-    return application, payload.get("sub")
+    return application
 
 async def check_rate_limit(
     app: Application,
@@ -130,11 +165,16 @@ def log_api_call(
 async def query_order(
     order_id: str,
     request: Request,
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
+    signature: Optional[str] = Header(None, alias="X-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
 ):
     start_time = time.time()
-    app, app_code = await verify_business_access(authorization, db)
+    app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
     has_access = AccessScopeService.check_access(db, app.id, "ORDER_QUERY")
     if not has_access:
@@ -187,11 +227,16 @@ async def query_order(
 async def query_customer(
     customer_id: str,
     request: Request,
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
+    signature: Optional[str] = Header(None, alias="X-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
 ):
     start_time = time.time()
-    app, app_code = await verify_business_access(authorization, db)
+    app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
     has_access = AccessScopeService.check_access(db, app.id, "CUSTOMER_QUERY")
     if not has_access:
@@ -245,11 +290,16 @@ async def query_customer(
 async def query_product(
     product_id: str,
     request: Request,
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
+    signature: Optional[str] = Header(None, alias="X-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
 ):
     start_time = time.time()
-    app, app_code = await verify_business_access(authorization, db)
+    app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
     has_access = AccessScopeService.check_access(db, app.id, "PRODUCT_QUERY")
     if not has_access:
@@ -294,11 +344,16 @@ async def query_product(
 async def create_aftersale(
     aftersale_req: AfterSaleCreateRequest,
     request: Request,
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
+    signature: Optional[str] = Header(None, alias="X-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
 ):
     start_time = time.time()
-    app, app_code = await verify_business_access(authorization, db)
+    app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
     has_access = AccessScopeService.check_access(db, app.id, "AFTERSALE_CREATE")
     if not has_access:
@@ -367,11 +422,16 @@ async def create_aftersale(
 async def query_aftersale(
     aftersale_id: str,
     request: Request,
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
+    signature: Optional[str] = Header(None, alias="X-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
 ):
     start_time = time.time()
-    app, app_code = await verify_business_access(authorization, db)
+    app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
     has_access = AccessScopeService.check_access(db, app.id, "AFTERSALE_QUERY")
     if not has_access:
@@ -418,11 +478,16 @@ async def query_aftersale(
 async def update_order_status(
     status_req: OrderStatusUpdateRequest,
     request: Request,
-    authorization: str = Header(...),
+    authorization: Optional[str] = Header(None),
+    app_code: Optional[str] = Header(None, alias="X-App-Code"),
+    app_secret: Optional[str] = Header(None, alias="X-App-Secret"),
+    signature: Optional[str] = Header(None, alias="X-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    nonce: Optional[str] = Header(None, alias="X-Nonce"),
     db: Session = Depends(get_db)
 ):
     start_time = time.time()
-    app, app_code = await verify_business_access(authorization, db)
+    app = await verify_business_access(authorization, app_code, app_secret, signature, timestamp, nonce, db)
     
     has_access = AccessScopeService.check_access(db, app.id, "ORDER_STATUS_UPDATE")
     if not has_access:
@@ -474,7 +539,8 @@ async def update_order_status(
             "new_status": status_req.new_status,
             "updated_at": updated_order.updated_at.isoformat() + "Z",
             "request_id": request_id
-        }
+        },
+        callback_url=app.callback_url
     )
     
     result = {
@@ -483,7 +549,8 @@ async def update_order_status(
         "new_status": status_req.new_status,
         "updated_at": updated_order.updated_at.isoformat() + "Z",
         "callback_id": callback.id,
-        "request_id": request_id
+        "request_id": request_id,
+        "callback_url_configured": app.callback_url is not None
     }
     
     duration_ms = int((time.time() - start_time) * 1000)

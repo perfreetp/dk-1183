@@ -17,6 +17,8 @@ class CallbackService:
     ) -> Callback:
         if not callback_url:
             app = db.query(Application).filter(Application.id == application_id).first()
+            if app:
+                callback_url = app.callback_url
         
         callback = Callback(
             application_id=application_id,
@@ -39,6 +41,12 @@ class CallbackService:
         
         if callback.status == CallbackStatus.CONFIRMED:
             return True
+        
+        if not callback.callback_url:
+            callback.status = CallbackStatus.FAILED
+            callback.error_message = "No callback URL configured for application"
+            db.commit()
+            return False
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:

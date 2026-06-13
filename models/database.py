@@ -39,10 +39,10 @@ class Application(Base):
     contact_name = Column(String(50))
     contact_email = Column(String(100))
     contact_phone = Column(String(20))
+    callback_url = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    api_credentials = relationship("ApiCredential", back_populates="application")
     access_scopes = relationship("AccessScope", back_populates="application")
     call_logs = relationship("CallLog", back_populates="application")
 

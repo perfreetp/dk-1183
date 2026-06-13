@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import timedelta
 import uuid
+from pydantic import BaseModel, Field
 
 from config.database import get_db
 from schemas.schemas import (
@@ -360,4 +361,69 @@ async def get_my_call_logs(
         code=200,
         message="Success",
         data={"logs": log_list, "total": len(log_list), "skip": skip, "limit": limit}
+    )
+
+class CallbackUrlRequest(BaseModel):
+    callback_url: str = Field(..., description="回调通知地址")
+
+@router.post("/partner/callback/url", response_model=ApiResponse)
+async def set_callback_url(
+    request: CallbackUrlRequest,
+    app: Application = Depends(verify_app_credentials),
+    db: Session = Depends(get_db)
+):
+    app.callback_url = request.callback_url
+    db.commit()
+    db.refresh(app)
+    
+    return ApiResponse(
+        code=200,
+        message="Callback URL updated successfully",
+        data={"callback_url": app.callback_url}
+    )
+
+@router.get("/partner/callback/url", response_model=ApiResponse)
+async def get_callback_url(
+    app: Application = Depends(verify_app_credentials),
+    db: Session = Depends(get_db)
+):
+    return ApiResponse(
+        code=200,
+        message="Success",
+        data={"callback_url": app.callback_url}
+    )
+
+@router.get("/partner/callback/logs", response_model=ApiResponse)
+async def get_my_callback_logs(
+    status: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    app: Application = Depends(verify_app_credentials),
+    db: Session = Depends(get_db)
+):
+    from services.callback_service import CallbackService
+    
+    callbacks = CallbackService.get_callbacks_by_application(
+        db, app.id, status=status, skip=skip, limit=limit
+    )
+    
+    callback_list = [
+        {
+            "id": cb.id,
+            "event_type": cb.event_type,
+            "status": cb.status.value,
+            "retry_count": cb.retry_count,
+            "max_retries": cb.max_retries,
+            "callback_url": cb.callback_url,
+            "error_message": cb.error_message,
+            "created_at": cb.created_at.isoformat(),
+            "updated_at": cb.updated_at.isoformat()
+        }
+        for cb in callbacks
+    ]
+    
+    return ApiResponse(
+        code=200,
+        message="Success",
+        data={"callbacks": callback_list, "total": len(callback_list)}
     )
